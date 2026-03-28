@@ -69,6 +69,14 @@ export class WhatsAppChannel implements Channel {
 
     const { state, saveCreds } = await useMultiFileAuthState(authDir);
 
+    // Baileys requires ILogger which adds level/child/trace on top of our logger
+    const baileysLogger = Object.assign(Object.create(logger), {
+      level: process.env.LOG_LEVEL ?? 'silent',
+      trace: (dataOrMsg: Record<string, unknown> | string, msg?: string) =>
+        logger.debug(dataOrMsg, msg),
+      child: () => baileysLogger,
+    });
+
     const { version } = await fetchLatestWaWebVersion({}).catch((err) => {
       logger.warn(
         { err },
@@ -80,15 +88,18 @@ export class WhatsAppChannel implements Channel {
       version,
       auth: {
         creds: state.creds,
-        keys: makeCacheableSignalKeyStore(state.keys, logger),
+        keys: makeCacheableSignalKeyStore(state.keys, baileysLogger),
       },
       printQRInTerminal: false,
-      logger,
+      logger: baileysLogger,
       browser: Browsers.macOS('Chrome'),
       getMessage: async (key: WAMessageKey) => {
         const cached = this.sentMessageCache.get(key.id || '');
         if (cached) {
-          logger.debug({ id: key.id }, 'getMessage: returning cached message for retry');
+          logger.debug(
+            { id: key.id },
+            'getMessage: returning cached message for retry',
+          );
           return cached;
         }
         logger.debug({ id: key.id }, 'getMessage: no cached message found');
@@ -208,7 +219,10 @@ export class WhatsAppChannel implements Channel {
             const phoneJid = pn.includes('@') ? pn : `${pn}@s.whatsapp.net`;
             this.lidToPhoneMap[rawJid.split('@')[0].split(':')[0]] = phoneJid;
             chatJid = phoneJid;
-            logger.info({ lidJid: rawJid, phoneJid }, 'Translated LID via senderPn');
+            logger.info(
+              { lidJid: rawJid, phoneJid },
+              'Translated LID via senderPn',
+            );
           }
 
           const timestamp = new Date(
@@ -238,7 +252,10 @@ export class WhatsAppChannel implements Channel {
             // WhatsApp group mentions use the LID in raw text (e.g. "@80355281346633")
             // instead of the display name. Normalize to @AssistantName for trigger matching.
             if (this.botLidUser && content.includes(`@${this.botLidUser}`)) {
-              content = content.replace(`@${this.botLidUser}`, `@${ASSISTANT_NAME}`);
+              content = content.replace(
+                `@${this.botLidUser}`,
+                `@${ASSISTANT_NAME}`,
+              );
             }
 
             // Skip protocol messages with no text content (encryption keys, read receipts, etc.)
@@ -269,7 +286,11 @@ export class WhatsAppChannel implements Channel {
           } else if (chatJid !== rawJid) {
             // LID translation produced a JID that doesn't match any registered group
             logger.warn(
-              { rawJid, translatedJid: chatJid, registeredJids: Object.keys(groups) },
+              {
+                rawJid,
+                translatedJid: chatJid,
+                registeredJids: Object.keys(groups),
+              },
               'Message JID not found in registered groups after translation',
             );
           }
@@ -400,7 +421,9 @@ export class WhatsAppChannel implements Channel {
 
     // Query Baileys' signal repository for the mapping
     try {
-      const pn = await (this.sock.signalRepository as any)?.lidMapping?.getPNForLID(jid);
+      const pn = await (
+        this.sock.signalRepository as any
+      )?.lidMapping?.getPNForLID(jid);
       if (pn) {
         const phoneJid = `${pn.split('@')[0].split(':')[0]}@s.whatsapp.net`;
         this.lidToPhoneMap[lidUser] = phoneJid;
